@@ -47,7 +47,10 @@ void setup() {
         debugSetup();
     #endif
 
-    // Init EEPROM, Serial, SPIFFS and system check
+    // Init EEPROM
+    eepromSetup();
+
+    // Init Serial, SPIFFS and system check
     systemSetup();
 
     // Init persistance and terminal features
@@ -96,8 +99,12 @@ void setup() {
     #endif
 
     relaySetup();
-    buttonSetup();
-    ledSetup();
+    #if BUTTON_SUPPORT
+        buttonSetup();
+    #endif
+    #if LED_SUPPORT
+        ledSetup();
+    #endif
     #if MQTT_SUPPORT
         mqttSetup();
     #endif
@@ -136,6 +143,9 @@ void setup() {
     #endif
     #if THINGSPEAK_SUPPORT
         tspkSetup();
+    #endif
+    #if RFM69_SUPPORT
+        rfm69Setup();
     #endif
     #if RF_SUPPORT
         rfSetup();
