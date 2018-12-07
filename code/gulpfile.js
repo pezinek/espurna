@@ -31,7 +31,6 @@ const runSequence = require('run-sequence');
 const through = require('through2');
 
 const htmlmin = require('gulp-htmlmin');
-const uglify = require('gulp-uglify');
 const inline = require('gulp-inline');
 const inlineImages = require('gulp-css-base64');
 const favicon = require('gulp-base64-favicon');
@@ -72,8 +71,8 @@ var toHeader = function(name, debug) {
         output += '#define ' + safename + '_len ' + source.contents.length + '\n';
         output += 'const uint8_t ' + safename + '[] PROGMEM = {';
         for (var i=0; i<source.contents.length; i++) {
-            if (i > 0) output += ',';
-            if (0 === (i % 20)) output += '\n';
+            if (i > 0) { output += ','; }
+            if (0 === (i % 20)) { output += '\n'; }
             output += '0x' + ('00' + source.contents[i].toString(16)).slice(-2);
         }
         output += '\n};';
@@ -115,7 +114,7 @@ var buildWebUI = function(module) {
     if ('all' === module) {
         modules['light'] = true;
         modules['sensor'] = true;
-        modules['rfbridge'] = false;   // we will never be adding this except when building RFBRIDGE
+        modules['rfbridge'] = true;
         modules['rfm69'] = false;   // we will never be adding this except when building RFM69GW
     } else if ('small' !== module) {
         modules[module] = true;
