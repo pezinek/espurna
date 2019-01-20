@@ -15,7 +15,7 @@ cd code
 #pio run -t upload -e itead-s20-ota --upload-port 192.168.1.89
 
 # Sonoff 4
-#pio run -t upload -e itead-sonoff-basic-ota --upload-port 192.168.1.81
+pio run -t upload -e itead-sonoff-basic-pir-ota --upload-port 192.168.1.81 
 
 # leds8
 #pio run -t upload -e magichome-led-controller-ota --upload-port 192.168.1.91
@@ -35,4 +35,7 @@ cd code
 
 # leds4
 #pio run -t upload -e magichome-led-controller-ota --upload-port 192.168.1.57
+
+# Sonoff 2
+#pio run -t upload -e itead-sonoff-basic-dht-ota --upload-port 192.168.1.59
 
