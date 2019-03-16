@@ -2,6 +2,9 @@ export ESPURNA_FLAGS="-DUSE_PASSWORD=0"
 
 cd code
 
+#pio run -t upload -e itead-sonoff-basic-r2-dht 
+pio run -t upload -e itead-sonoff-basic
+
 # Office lamp
 #pio run -t upload -e magichome-led-controller-ota --upload-port 192.168.1.80
 
@@ -14,8 +17,8 @@ cd code
 # S26 socket
 #pio run -t upload -e itead-s20-ota --upload-port 192.168.1.89
 
-# Sonoff 4
-pio run -t upload -e itead-sonoff-basic-pir-ota --upload-port 192.168.1.81 
+# Sonoff 4 - basement light
+#pio run -t upload -e itead-sonoff-basic-pir-ota --upload-port 192.168.1.81 
 
 # leds8
 #pio run -t upload -e magichome-led-controller-ota --upload-port 192.168.1.91
