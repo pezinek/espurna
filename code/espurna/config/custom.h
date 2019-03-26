@@ -26,7 +26,7 @@
     #define BUTTON2_DBLCLICK    BUTTON_MODE_OFF
     #define BUTTON2_LNGCLICK    BUTTON_MODE_OFF
     #define BUTTON2_LNGLNGCLICK BUTTON_MODE_OFF
-    #define BUTTON2_RELAY       01
+    #define BUTTON2_RELAY       02
 
 
     // Relays
