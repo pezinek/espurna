@@ -8,6 +8,8 @@
     #define BUTTON1_MODE        BUTTON_PUSHBUTTON | BUTTON_DEFAULT_HIGH
     #define BUTTON1_RELAY       1
 
+    #define DUMMY_RELAY_COUNT   1
+
     /*
     #ifndef DIGITAL_SUPPORT
     #define DIGITAL_SUPPORT      1
@@ -24,7 +26,7 @@
     #define BUTTON2_DBLCLICK    BUTTON_MODE_OFF
     #define BUTTON2_LNGCLICK    BUTTON_MODE_OFF
     #define BUTTON2_LNGLNGCLICK BUTTON_MODE_OFF
-    #define BUTTON2_RELAY       1
+    #define BUTTON2_RELAY       01
 
 
     // Relays
