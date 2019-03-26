@@ -1,7 +1,7 @@
 
     // Info
     #define MANUFACTURER        "ITEAD"
-    #define DEVICE              "SONOFF_BASIC_CUSTOM"
+    #define DEVICE              "SONOFF_BASIC_PIR_BH1750"
 
     // Buttons
     #define BUTTON1_PIN         0
@@ -36,3 +36,9 @@
     // LEDs
     #define LED1_PIN            13
     #define LED1_PIN_INVERSE    1
+
+    // I2C
+    #define I2C_SDA_PIN         3
+    #define I2C_SCL_PIN         1
+
+    #define BH1750_SUPPORT      1
