@@ -8,7 +8,7 @@
     #define BUTTON1_MODE        BUTTON_PUSHBUTTON | BUTTON_DEFAULT_HIGH
     #define BUTTON1_RELAY       1
 
-    #define DUMMY_RELAY_COUNT   1
+    //#define DUMMY_RELAY_COUNT   1
 
     /*
     #ifndef DIGITAL_SUPPORT
@@ -32,6 +32,9 @@
     // Relays
     #define RELAY1_PIN          12
     #define RELAY1_TYPE         RELAY_TYPE_NORMAL
+
+    #define RELAY2_PIN          4 
+    #define RELAY2_TYPE         RELAY_TYPE_NORMAL
 
     // LEDs
     #define LED1_PIN            13
