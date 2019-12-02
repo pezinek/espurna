@@ -1,3 +1,4 @@
+var debug = false;
 var websock;
 var password = false;
 var maxNetworks;
@@ -11,6 +12,7 @@ var numChanged = 0;
 var numReboot = 0;
 var numReconnect = 0;
 var numReload = 0;
+var conf_saved = false;
 
 var useWhite = false;
 var useCCT = false;
@@ -22,6 +24,10 @@ var ago = 0;
 var packets;
 var filters = [];
 <!-- endRemoveIf(!rfm69)-->
+
+<!-- removeIf(!sensor)-->
+var magnitudes = [];
+<!-- endRemoveIf(!sensor)-->
 
 // -----------------------------------------------------------------------------
 // Messages
@@ -46,7 +52,7 @@ function sensorName(id) {
         "HLW8012", "V9261F", "ECH1560", "Analog", "Digital",
         "Events", "PMSX003", "BMX280", "MHZ19", "SI7021",
         "SHT3X I2C", "BH1750", "PZEM004T", "AM2320 I2C", "GUVAS12SD",
-        "TMP3X", "Sonar", "SenseAir", "GeigerTicks", "GeigerCPM",
+        "T6613", "TMP3X", "Sonar", "SenseAir", "GeigerTicks", "GeigerCPM",
         "NTC", "SDS011", "MICS2710", "MICS5525", "VL53L1X", "VEML6075",
         "EZOPH"
     ];
@@ -245,19 +251,25 @@ function addValue(data, name, value) {
     var is_group = [
         "ssid", "pass", "gw", "mask", "ip", "dns",
         "schEnabled", "schSwitch","schAction","schType","schHour","schMinute","schWDs","schUTC",
-        "relayBoot", "relayPulse", "relayTime",
+        "relayBoot", "relayPulse", "relayTime", "relayLastSch",
         "mqttGroup", "mqttGroupSync", "relayOnDisc",
         "dczRelayIdx", "dczMagnitude",
         "tspkRelay", "tspkMagnitude",
-        "ledMode",
+        "ledMode", "ledRelay",
         "adminPass",
-        "node", "key", "topic"
+        "node", "key", "topic",
+        "rpnRule", "rpnTopic", "rpnName"
     ];
 
 
     // join both adminPass 1 and 2
     if (name.startsWith("adminPass")) {
         name = "adminPass";
+    }
+
+    // join all relayLastSch values
+    if (name.startsWith("relayLastSch")) {
+        name = "relayLastSch";
     }
 
     if (name in data) {
@@ -324,7 +336,9 @@ function randomString(length, args) {
 
 function generateAPIKey() {
     var apikey = randomString(16, {hex: true});
-    $("input[name='apiKey']").val(apikey);
+    $("input[name='apiKey']")
+        .val(apikey)
+        .attr("haschanged", "true");
     return false;
 }
 
@@ -350,6 +364,7 @@ function toggleVisiblePassword() {
 function doGeneratePassword() {
     $("input", $("#formPassword"))
         .val(generatePassword())
+        .attr("haschanged", "true")
         .each(function() {
             this.type = "text";
         });
@@ -364,24 +379,95 @@ function getJson(str) {
     }
 }
 
+<!-- removeIf(!thermostat)-->
+function checkTempRangeMin() {
+    var min = parseInt($("#tempRangeMinInput").val(), 10);
+    var max = parseInt($("#tempRangeMaxInput").val(), 10);
+    if (min > max - 1) {
+        $("#tempRangeMinInput").val(max - 1);
+    }
+}
+
+function checkTempRangeMax() {
+    var min = parseInt($("#tempRangeMinInput").val(), 10);
+    var max = parseInt($("#tempRangeMaxInput").val(), 10);
+    if (max < min + 1) {
+        $("#tempRangeMaxInput").val(min + 1);
+    }
+}
+
+function doResetThermostatCounters(ask) {
+    var question = (typeof ask === "undefined" || false === ask) ?
+        null :
+        "Are you sure you want to reset burning counters?";
+    return doAction(question, "thermostat_reset_counters");
+}
+<!-- endRemoveIf(!thermostat)-->
+
+function initGPIO(node, name, key, value) {
+
+    var template = $("#gpioConfigTemplate").children();
+    var line = $(template).clone();
+    $("span.id", line).html(value);
+    $("select", line).attr("name", key);
+    line.appendTo(node);
+
+}
+
+function initSelectGPIO(select) {
+    // TODO: cross-check used GPIOs
+    // TODO: support 9 & 10 with esp8285 variant
+    var mapping = [
+        [153, "NONE"],
+        [0, "0"],
+        [1, "1 (U0TXD)"],
+        [2, "2 (U1TXD)"],
+        [3, "3 (U0RXD)"],
+        [4, "4"],
+        [5, "5"],
+        [12, "12 (MTDI)"],
+        [13, "13 (MTCK)"],
+        [14, "14 (MTMS)"],
+        [15, "15 (MTDO)"],
+    ];
+    for (n in mapping) {
+        var elem = $('<option value="' + mapping[n][0] + '">');
+        elem.html(mapping[n][1]);
+        elem.appendTo(select);
+    }
+}
+
+
 // -----------------------------------------------------------------------------
 // Actions
 // -----------------------------------------------------------------------------
 
+function send(json) {
+    if (debug) console.log(json);
+    websock.send(json);
+}
+
 function sendAction(action, data) {
-    websock.send(JSON.stringify({action: action, data: data}));
+    send(JSON.stringify({action: action, data: data}));
 }
 
 function sendConfig(data) {
-    websock.send(JSON.stringify({config: data}));
+    send(JSON.stringify({config: data}));
 }
 
 function setOriginalsFromValues(force) {
-    var force = (true === force);
+    force = (true === force);
     $("input,select").each(function() {
         var initial = (undefined === $(this).attr("original"));
         if (force || initial) {
-            $(this).attr("original", $(this).val());
+            var value;
+            if ($(this).attr("type") === "checkbox") {
+                value = $(this).prop("checked");
+            } else {
+                value = $(this).val();
+            }
+            $(this).attr("original", value);
+            hasChanged.call(this);
         }
     });
 }
@@ -389,6 +475,7 @@ function setOriginalsFromValues(force) {
 function resetOriginals() {
     setOriginalsFromValues(true);
     numReboot = numReconnect = numReload = 0;
+    conf_saved = false;
 }
 
 function doReload(milliseconds) {
@@ -448,47 +535,35 @@ function doUpgrade() {
         var data = new FormData();
         data.append("upgrade", file, file.name);
 
-        $.ajax({
+        var xhr = new XMLHttpRequest();
 
-            // Your server script to process the upload
-            url: urls.upgrade.href,
-            type: "POST",
+        var network_error = function() {
+            alert("There was a network error trying to upload the new image, please try again.");
+        };
+        xhr.addEventListener("error", network_error, false);
+        xhr.addEventListener("abort", network_error, false);
 
-            // Form data
-            data: data,
-
-            // Tell jQuery not to process data or worry about content-type
-            // You *must* include these options!
-            cache: false,
-            contentType: false,
-            processData: false,
-
-            success: function(data, text) {
-                $("#upgrade-progress").hide();
-                if ("OK" === data) {
-                    alert("Firmware image uploaded, board rebooting. This page will be refreshed in 5 seconds.");
-                    doReload(5000);
-                } else {
-                    alert("There was an error trying to upload the new image, please try again (" + data + ").");
-                }
-            },
-
-            // Custom XMLHttpRequest
-            xhr: function() {
-                $("#upgrade-progress").show();
-                var myXhr = $.ajaxSettings.xhr();
-                if (myXhr.upload) {
-                    // For handling the progress of the upload
-                    myXhr.upload.addEventListener("progress", function(e) {
-                        if (e.lengthComputable) {
-                            $("progress").attr({ value: e.loaded, max: e.total });
-                        }
-                    } , false);
-                }
-                return myXhr;
+        xhr.addEventListener("load", function(e) {
+            $("#upgrade-progress").hide();
+            if ("OK" === xhr.responseText) {
+                alert("Firmware image uploaded, board rebooting. This page will be refreshed in 5 seconds.");
+                doReload(5000);
+            } else {
+                alert("There was an error trying to upload the new image, please try again ("
+                    + "response: " + xhr.responseText + ", "
+                    + "status: " + xhr.statusText + ")");
             }
+        }, false);
 
-        });
+        xhr.upload.addEventListener("progress", function(e) {
+            $("#upgrade-progress").show();
+            if (e.lengthComputable) {
+                $("progress").attr({ value: e.loaded, max: e.total });
+            }
+        }, false);
+
+        xhr.open("POST", urls.upgrade.href);
+        xhr.send(data);
 
     });
 
@@ -550,6 +625,31 @@ function doReconnect(ask) {
 
 }
 
+function doCheckOriginals() {
+    var response;
+
+    if (numReboot > 0) {
+        response = window.confirm("You have to reboot the board for the changes to take effect, do you want to do it now?");
+        if (response) { doReboot(false); }
+    } else if (numReconnect > 0) {
+        response = window.confirm("You have to reconnect to the WiFi for the changes to take effect, do you want to do it now?");
+        if (response) { doReconnect(false); }
+    } else if (numReload > 0) {
+        response = window.confirm("You have to reload the page to see the latest changes, do you want to do it now?");
+        if (response) { doReload(0); }
+    }
+
+    resetOriginals();
+}
+
+function waitForSave(){
+    if (conf_saved == false) {
+        setTimeout(waitForSave, 1000);
+    } else {
+        doCheckOriginals();
+    }
+}
+
 function doUpdate() {
 
     var forms = $(".form-settings");
@@ -566,24 +666,8 @@ function doUpdate() {
 
         // Change handling
         numChanged = 0;
-        setTimeout(function() {
 
-            var response;
-
-            if (numReboot > 0) {
-                response = window.confirm("You have to reboot the board for the changes to take effect, do you want to do it now?");
-                if (response) { doReboot(false); }
-            } else if (numReconnect > 0) {
-                response = window.confirm("You have to reconnect to the WiFi for the changes to take effect, do you want to do it now?");
-                if (response) { doReconnect(false); }
-            } else if (numReload > 0) {
-                response = window.confirm("You have to reload the page to see the latest changes, do you want to do it now?");
-                if (response) { doReload(0); }
-            }
-
-            resetOriginals();
-
-        }, 1000);
+        waitForSave();
 
     }
 
@@ -728,6 +812,11 @@ function doClearFilters() {
 
 <!-- endRemoveIf(!rfm69)-->
 
+function delParent() {
+    var parent = $(this).parent().parent();
+    $(parent).remove();
+}
+
 // -----------------------------------------------------------------------------
 // Visualization
 // -----------------------------------------------------------------------------
@@ -775,7 +864,7 @@ function createMagnitudeList(data, container, template_name) {
     for (var i=0; i<size; ++i) {
         var line = $(template).clone();
         $("label", line).html(magnitudeType(data.type[i]) + " #" + parseInt(data.index[i], 10));
-        $("div.hint", line).html(data.name[i]);
+        $("div.hint", line).html(magnitudes[i].description);
         $("input", line).attr("tabindex", 40 + i).val(data.idx[i]);
         line.appendTo("#" + container);
     }
@@ -784,10 +873,37 @@ function createMagnitudeList(data, container, template_name) {
 <!-- endRemoveIf(!sensor)-->
 
 // -----------------------------------------------------------------------------
+// RPN Rules
+// -----------------------------------------------------------------------------
+
+function addRPNRule() {
+    var template = $("#rpnRuleTemplate .pure-g")[0];
+    var line = $(template).clone();
+    var tabindex = $("#rpnRules > div").length + 100;
+    $(line).find("input").each(function() {
+        $(this).attr("tabindex", tabindex++);
+    });
+    $(line).find("button").on('click', delParent);
+    line.appendTo("#rpnRules");
+}
+
+function addRPNTopic() {
+    var template = $("#rpnTopicTemplate .pure-g")[0];
+    var line = $(template).clone();
+    var tabindex = $("#rpnTopics > div").length + 120;
+    $(line).find("input").each(function() {
+        $(this).attr("tabindex", tabindex++);
+    });
+    $(line).find("button").on('click', delParent);
+    line.appendTo("#rpnTopics");
+}
+
+// -----------------------------------------------------------------------------
 // RFM69
 // -----------------------------------------------------------------------------
 
 <!-- removeIf(!rfm69)-->
+
 function addMapping() {
     var template = $("#nodeTemplate .pure-g")[0];
     var line = $(template).clone();
@@ -795,14 +911,10 @@ function addMapping() {
     $(line).find("input").each(function() {
         $(this).attr("tabindex", tabindex++);
     });
-    $(line).find("button").on('click', delMapping);
+    $(line).find("button").on('click', delParent);
     line.appendTo("#mapping");
 }
 
-function delMapping() {
-    var parent = $(this).parent().parent();
-    $(parent).remove();
-}
 <!-- endRemoveIf(!rfm69)-->
 
 // -----------------------------------------------------------------------------
@@ -871,8 +983,7 @@ function addSchedule(event) {
     var type = (1 === event.data.schType) ? "switch" : "light";
 
     template = $("#" + type + "ActionTemplate").children();
-    var actionLine = template.clone();
-    $(line).find("#schActionDiv").append(actionLine);
+    $(line).find("#schActionDiv").append(template.clone());
 
     $(line).find("input").each(function() {
         $(this).attr("tabindex", tabindex);
@@ -916,12 +1027,22 @@ function initRelays(data) {
         $("label.toggle", line).prop("for", "relay" + i)
         line.appendTo("#relays");
 
-        // Populate the relay SELECTs
-        $("select.isrelay").append(
-            $("<option></option>").attr("value",i).text("Switch #" + i));
-
     }
 
+}
+
+function updateRelays(data) {
+    var size = data.size;
+    for (var i=0; i<size; ++i) {
+        var elem = $("input[name='relay'][data='" + i + "']");
+        elem.prop("checked", data.status[i]);
+        var lock = {
+            0: false,
+            1: !data.status[i],
+            2: data.status[i]
+        };
+        elem.prop("disabled", lock[data.lock[i]]); // RELAY_LOCK_DISABLED=0
+    }
 }
 
 function createCheckboxes() {
@@ -954,18 +1075,44 @@ function initRelayConfig(data) {
         $("select[name='relayBoot']", line).val(data.boot[i]);
         $("select[name='relayPulse']", line).val(data.pulse[i]);
         $("input[name='relayTime']", line).val(data.pulse_time[i]);
+        $("input[name='relayLastSch']", line).prop('checked', data.sch_last[i]);
+        $("input[name='relayLastSch']", line).attr("id", "relayLastSch" + i);
+        $("input[name='relayLastSch']", line).attr("name", "relayLastSch" + i);
+        $("input[name='relayLastSch" + i + "']", line).next().attr("for","relayLastSch" + (i));
 
         if ("group" in data) {
             $("input[name='mqttGroup']", line).val(data.group[i]);
         }
         if ("group_sync" in data) {
-            $("input[name='mqttGroupSync']", line).val(data.group_sync[i]);
+            $("select[name='mqttGroupSync']", line).val(data.group_sync[i]);
         }
         if ("on_disc" in data) {
-            $("input[name='relayOnDisc']", line).val(data.on_disc[i]);
+            $("select[name='relayOnDisc']", line).val(data.on_disc[i]);
         }
 
         line.appendTo("#relayConfig");
+
+        // Populate the relay SELECTs
+        $("select.isrelay").append(
+            $("<option></option>").attr("value",i).text("Switch #" + i));
+
+    }
+
+}
+
+function initLeds(data) {
+
+    var current = $("#ledConfig > div").length;
+    if (current > 0) { return; }
+
+    var size = data.length;
+    var template = $("#ledConfigTemplate").children();
+    for (var i=0; i<size; ++i) {
+        var line = $(template).clone();
+        $("span.id", line).html(i);
+        $("select", line).attr("data", i);
+        $("input", line).attr("data", i);
+        line.appendTo("#ledConfig");
     }
 
 }
@@ -987,9 +1134,16 @@ function initMagnitudes(data) {
     var template = $("#magnitudeTemplate").children();
 
     for (var i=0; i<size; ++i) {
+        var magnitude = {
+            "name": magnitudeType(data.type[i]) + " #" + parseInt(data.index[i], 10),
+            "units": data.units[i],
+            "description": data.description[i]
+        };
+        magnitudes.push(magnitude);
+
         var line = $(template).clone();
-        $("label", line).html(magnitudeType(data.type[i]) + " #" + parseInt(data.index[i], 10));
-        $("div.hint", line).html(data.description[i]);
+        $("label", line).html(magnitude.name);
+        $("div.hint", line).html(magnitude.description);
         $("input", line).attr("data", i);
         line.appendTo("#magnitudes");
     }
@@ -1003,7 +1157,47 @@ function initMagnitudes(data) {
 
 <!-- removeIf(!light)-->
 
-function initColor(rgb) {
+// wheelColorPicker accepts:
+//   hsv(0...360,0...1,0...1)
+//   hsv(0...100%,0...100%,0...100%)
+// While we use:
+//   hsv(0...360,0...100%,0...100%)
+
+function _hsv_round(value) {
+    return Math.round(value * 100) / 100;
+}
+
+function getPickerRGB(picker) {
+    return $(picker).wheelColorPicker("getValue", "css");
+}
+
+function setPickerRGB(picker, color) {
+    $(picker).wheelColorPicker("setValue", value, true);
+}
+
+// TODO: use pct values instead of doing conversion?
+function getPickerHSV(picker) {
+    var color = $(picker).wheelColorPicker("getColor");
+    return String(Math.ceil(_hsv_round(color.h) * 360))
+        + "," + String(Math.ceil(_hsv_round(color.s) * 100))
+        + "," + String(Math.ceil(_hsv_round(color.v) * 100));
+}
+
+function setPickerHSV(picker, value) {
+    if (value === getPickerHSV(picker)) return;
+    var chunks = value.split(",");
+    $(picker).wheelColorPicker("setColor", {
+        h: _hsv_round(chunks[0] / 360),
+        s: _hsv_round(chunks[1] / 100),
+        v: _hsv_round(chunks[2] / 100)
+    });
+}
+
+function initColor(cfg) {
+    var rgb = false;
+    if (typeof cfg === "object") {
+        rgb = cfg.rgb;
+    }
 
     // check if already initialized
     var done = $("#colors > div").length;
@@ -1016,15 +1210,12 @@ function initColor(rgb) {
 
     // init color wheel
     $("input[name='color']").wheelColorPicker({
-        sliders: (rgb ? "wrgbp" : "whsvp")
+        sliders: (rgb ? "wrgbp" : "whsp")
     }).on("sliderup", function() {
         if (rgb) {
-            var value = $(this).wheelColorPicker("getValue", "css");
-            sendAction("color", {rgb: value});
+            sendAction("color", {rgb: getPickerRGB(this)});
         } else {
-            var color = $(this).wheelColorPicker("getColor");
-            var value = parseInt(color.h * 360, 10) + "," + parseInt(color.s * 100, 10) + "," + parseInt(color.v * 100, 10);
-            sendAction("color", {hsv: value});
+            sendAction("color", {hsv: getPickerHSV(this)});
         }
     });
 
@@ -1207,6 +1398,8 @@ function initLightfox(data, relayCount) {
 
 function processData(data) {
 
+    if (debug) console.log(data);
+
     // title
     if ("app_name" in data) {
         var title = data.app_name;
@@ -1253,10 +1446,6 @@ function processData(data) {
         if ("rfbCount" === key) {
             for (i=0; i<data.rfbCount; i++) { addRfbNode(); }
             return;
-        }
-
-        if ("rfbrawVisible" === key) {
-            $("input[name='rfbcode']").attr("maxlength", 116);
         }
 
         if ("rfb" === key) {
@@ -1331,9 +1520,51 @@ function processData(data) {
 				});
 			}
 			return;
-		}
+        }
 
         <!-- endRemoveIf(!rfm69)-->
+
+        // ---------------------------------------------------------------------
+        // RPN Rules
+        // ---------------------------------------------------------------------
+
+        if (key == "rpnRules") {
+			for (var i in data.rpnRules) {
+
+				// add a new row
+				addRPNRule();
+
+				// get group
+				var line = $("#rpnRules .pure-g")[i];
+
+				// fill in the blanks
+				var rule = data.rpnRules[i];
+                $("input", line).val(rule).attr("original", rule);
+
+            }
+			return;
+		}
+
+        if (key == "rpnTopics") {
+			for (var i in data.rpnTopics) {
+
+				// add a new row
+				addRPNTopic();
+
+				// get group
+				var line = $("#rpnTopics .pure-g")[i];
+
+				// fill in the blanks
+				var topic = data.rpnTopics[i];
+				var name = data.rpnNames[i];
+                $("input[name='rpnTopic']", line).val(topic).attr("original", topic);
+                $("input[name='rpnName']", line).val(name).attr("original", name);
+
+            }
+			return;
+        }
+        
+        if (key == "rpnNames") return;
 
         // ---------------------------------------------------------------------
         // Lights
@@ -1342,20 +1573,14 @@ function processData(data) {
         <!-- removeIf(!light)-->
 
         if ("rgb" === key) {
-            initColor(true);
-            $("input[name='color']").wheelColorPicker("setValue", value, true);
+            initColor({rgb: true});
+            setPickerRGB($("input[name='color']"), value);
             return;
         }
 
         if ("hsv" === key) {
-            initColor(false);
-            // wheelColorPicker expects HSV to be between 0 and 1 all of them
-            var chunks = value.split(",");
-            var obj = {};
-            obj.h = chunks[0] / 360;
-            obj.s = chunks[1] / 100;
-            obj.v = chunks[2] / 100;
-            $("input[name='color']").wheelColorPicker("setColor", obj);
+            initColor({hsv: true});
+            setPickerHSV($("input[name='color']"), value);
             return;
         }
 
@@ -1377,8 +1602,10 @@ function processData(data) {
         }
 
         if ("mireds" === key) {
-            $("#mireds").val(value);
-            $("span.mireds").html(value);
+            $("#mireds").attr("min", value["cold"]);
+            $("#mireds").attr("max", value["warm"]);
+            $("#mireds").val(value["value"]);
+            $("span.mireds").html(value["value"]);
             return;
         }
 
@@ -1399,12 +1626,15 @@ function processData(data) {
 
         <!-- removeIf(!sensor)-->
 
-        if ("magnitudes" === key) {
+        if ("magnitudesConfig" === key) {
             initMagnitudes(value);
+        }
+
+        if ("magnitudes" === key) {
             for (var i=0; i<value.size; ++i) {
                 var error = value.error[i] || 0;
                 var text = (0 === error) ?
-                    value.value[i] + value.units[i] :
+                    value.value[i] + magnitudes[i].units :
                     magnitudeError(error);
                 var element = $("input[name='magnitude'][data='" + i + "']");
                 element.val(text);
@@ -1444,7 +1674,7 @@ function processData(data) {
         // -----------------------------------------------------------------------------
 
         if ("haConfig" === key) {
-            websock.send("{}");
+            send("{}");
             $("#haConfig")
                 .append(new Text(value))
                 .height($("#haConfig")[0].scrollHeight);
@@ -1479,17 +1709,28 @@ function processData(data) {
         // Relays
         // ---------------------------------------------------------------------
 
-        if ("relayStatus" === key) {
-            initRelays(value);
-            for (i in value) {
-                $("input[name='relay'][data='" + i + "']").prop("checked", value[i]);
-            }
+        if ("relayState" === key) {
+            initRelays(value.status);
+            updateRelays(value);
             return;
         }
 
         // Relay configuration
         if ("relayConfig" === key) {
             initRelayConfig(value);
+            return;
+        }
+
+        // ---------------------------------------------------------------------
+        // LEDs
+        // ---------------------------------------------------------------------
+
+        if ("ledConfig" === key) {
+            initLeds(value);
+            for (var i=0; i<value.length; ++i) {
+                $("select[name='ledMode'][data='" + i + "']").val(value[i].mode);
+                $("input[name='ledRelay'][data='" + i + "']").val(value[i].relay);
+            }
             return;
         }
 
@@ -1530,23 +1771,42 @@ function processData(data) {
         <!-- endRemoveIf(!sensor)-->
 
         // ---------------------------------------------------------------------
+        // HTTP API
+        // ---------------------------------------------------------------------
+
+        // Auto generate an APIKey if none defined yet
+        if ("apiVisible" === key) {
+            if (data.apiKey === undefined || data.apiKey === "") {
+                generateAPIKey();
+            }
+        }
+
+        // ---------------------------------------------------------------------
         // General
         // ---------------------------------------------------------------------
 
         // Messages
         if ("message" === key) {
+            if (value == 8 && (numReboot > 0 || numReload > 0 || numReconnect > 0)){
+                conf_saved = true;
+            }
             window.alert(messages[value]);
             return;
         }
 
         // Web log
         if ("weblog" === key) {
-            websock.send("{}");
+            send("{}");
 
-            if (value.prefix) {
-                $("#weblog").append(new Text(value.prefix));
+            msg = value["msg"];
+            pre = value["pre"];
+
+            for (var i=0; i < msg.length; ++i) {
+                if (pre[i]) {
+                    $("#weblog").append(new Text(pre[i]));
+                }
+                $("#weblog").append(new Text(msg[i]));
             }
-            $("#weblog").append(new Text(value.message));
 
             $("#weblog").scrollTop($("#weblog")[0].scrollHeight - $("#weblog").height());
             return;
@@ -1556,6 +1816,11 @@ function processData(data) {
         var position = key.indexOf("Visible");
         if (position > 0 && position === key.length - 7) {
             var module = key.slice(0,-7);
+            if (module == "sch") {
+                $("li.module-" + module).css("display", "inherit");
+                $("div.module-" + module).css("display", "flex");
+                return;
+            }
             $(".module-" + module).css("display", "inherit");
             return;
         }
@@ -1591,6 +1856,11 @@ function processData(data) {
             var days    = uptime;
             value = days + "d " + zeroPad(hours, 2) + "h " + zeroPad(minutes, 2) + "m " + zeroPad(seconds, 2) + "s";
         }
+        <!-- removeIf(!thermostat)-->
+        if ("tmpUnits" == key) {
+            $("span.tmpUnit").html(data[key] == 1 ? "ºF" : "ºC");
+        }
+        <!-- endRemoveIf(!thermostat)-->
 
         // ---------------------------------------------------------------------
         // Matching
@@ -1616,9 +1886,16 @@ function processData(data) {
         // Look for SPANs
         var span = $("span[name='" + key + "']");
         if (span.length > 0) {
-            pre = span.attr("pre") || "";
-            post = span.attr("post") || "";
-            span.html(pre + value + post);
+            if (Array.isArray(value)) {
+                value.forEach(function(elem) {
+                    span.append(elem);
+                    span.append('</br>');
+                });
+            } else {
+                pre = span.attr("pre") || "";
+                post = span.attr("post") || "";
+                span.html(pre + value + post);
+            }
         }
 
         // Look for SELECTs
@@ -1628,11 +1905,6 @@ function processData(data) {
         }
 
     });
-
-    // Auto generate an APIKey if none defined yet
-    if ($("input[name='apiKey']").val() === "") {
-        generateAPIKey();
-    }
 
     setOriginalsFromValues();
 
@@ -1700,12 +1972,17 @@ function connectToURL(url) {
 
     initUrls(url);
 
-    $.ajax({
+    fetch(urls.auth.href, {
         'method': 'GET',
-        'crossDomain': true,
-        'url': urls.auth.href,
-        'xhrFields': { 'withCredentials': true }
-    }).done(function(data) {
+        'cors': true,
+        'credentials': 'same-origin'
+    }).then(function(response) {
+        // Nothing to do, reload page and retry
+        if (response.status != 200) {
+            doReload(5000);
+            return;
+        }
+        // update websock object
         if (websock) { websock.close(); }
         websock = new WebSocket(urls.ws.href);
         websock.onmessage = function(evt) {
@@ -1714,8 +1991,9 @@ function connectToURL(url) {
                 processData(data);
             }
         };
-    }).fail(function() {
-        // Nothing to do, reload page and retry
+    }).catch(function(error) {
+        console.log(error);
+        doReload(5000);
     });
 
 }
@@ -1729,11 +2007,6 @@ function connect(host) {
 
 function connectToCurrentURL() {
     connectToURL(new URL(window.location));
-}
-
-function getParameterByName(name) {
-    var match = RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search);
-    return match && decodeURIComponent(match[1].replace(/\+/g, ' '));
 }
 
 $(function() {
@@ -1765,6 +2038,10 @@ $(function() {
     $("#uploader").on("change", onFileUpload);
     $(".button-upgrade").on("click", doUpgrade);
 
+    <!-- removeIf(!thermostat)-->
+    $(".button-thermostat-reset-counters").on('click', doResetThermostatCounters);
+    <!-- endRemoveIf(!thermostat)-->
+
     $(".button-apikey").on("click", generateAPIKey);
     $(".button-upgrade-browse").on("click", function() {
         $("input[name='upgrade']")[0].click();
@@ -1782,9 +2059,13 @@ $(function() {
     $(".button-add-light-schedule").on("click", { schType: 2 }, addSchedule);
     <!-- endRemoveIf(!light)-->
 
+    $(".button-add-rpnrule").on('click', addRPNRule);
+    $(".button-add-rpntopic").on('click', addRPNTopic);
+
+    $(".button-del-parent").on('click', delParent);
+
     <!-- removeIf(!rfm69)-->
     $(".button-add-mapping").on('click', addMapping);
-    $(".button-del-mapping").on('click', delMapping);
     $(".button-clear-counts").on('click', doClearCounts);
     $(".button-clear-messages").on('click', doClearMessages);
     $(".button-clear-filters").on('click', doClearFilters);
@@ -1797,6 +2078,10 @@ $(function() {
     }
     <!-- endRemoveIf(!rfm69)-->
 
+    $(".gpio-select").each(function(_, elem) {
+        initSelectGPIO(elem)
+    });
+
     $(document).on("change", "input", hasChanged);
     $(document).on("change", "select", hasChanged);
 
@@ -1806,7 +2091,10 @@ $(function() {
     if (window.location.protocol === "file:") { return; }
 
     // Check host param in query string
-    if (host = getParameterByName('host')) {
+    var search = new URLSearchParams(window.location.search),
+        host = search.get("host");
+
+    if (host !== null) {
         connect(host);
     } else {
         connectToCurrentURL();

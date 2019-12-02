@@ -22,25 +22,45 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "config/all.h"
 #include <vector>
 
-std::vector<void (*)()> _loop_callbacks;
-std::vector<void (*)()> _reload_callbacks;
+#include "system.h"
+#include "utils.h"
+#include "relay.h"
+#include "broker.h"
+#include "tuya.h"
+#include "libs/HeapStats.h"
+
+using void_callback_f = void (*)();
+
+std::vector<void_callback_f> _loop_callbacks;
+std::vector<void_callback_f> _reload_callbacks;
+
+bool _reload_config = false;
+unsigned long _loop_delay = 0;
 
 // -----------------------------------------------------------------------------
 // GENERAL CALLBACKS
 // -----------------------------------------------------------------------------
 
-void espurnaRegisterLoop(void (*callback)()) {
+void espurnaRegisterLoop(void_callback_f callback) {
     _loop_callbacks.push_back(callback);
 }
 
-void espurnaRegisterReload(void (*callback)()) {
+void espurnaRegisterReload(void_callback_f callback) {
     _reload_callbacks.push_back(callback);
 }
 
 void espurnaReload() {
-    for (unsigned char i = 0; i < _reload_callbacks.size(); i++) {
-        (_reload_callbacks[i])();
+    _reload_config = true;
+}
+
+void _espurnaReload() {
+    for (const auto& callback : _reload_callbacks) {
+        callback();
     }
+}
+
+unsigned long espurnaLoopDelay() {
+    return _loop_delay;
 }
 
 // -----------------------------------------------------------------------------
@@ -54,18 +74,33 @@ void setup() {
     // -------------------------------------------------------------------------
 
     // Cache initial free heap value
-    getInitialFreeHeap();
+    setInitialFreeHeap();
 
     // Serial debug
     #if DEBUG_SUPPORT
         debugSetup();
     #endif
 
+    // Init GPIO functions
+    gpioSetup();
+
+    // Init RTCMEM
+    rtcmemSetup();
+
     // Init EEPROM
     eepromSetup();
 
     // Init persistance
     settingsSetup();
+
+    // Init crash recorder
+    #if DEBUG_SUPPORT
+        crashSetup();
+    #endif
+
+    // Return bogus free heap value for broken devices
+    // XXX: device is likely to trigger other bugs! tread carefuly
+    wtfHeap(getSetting("wtfHeap", 0).toInt());
 
     // Init Serial, SPIFFS and system check
     systemSetup();
@@ -85,9 +120,14 @@ void setup() {
     info();
 
     wifiSetup();
-    otaSetup();
+    #if OTA_ARDUINOOTA_SUPPORT
+        arduinoOtaSetup();
+    #endif
     #if TELNET_SUPPORT
         telnetSetup();
+    #endif
+    #if OTA_CLIENT != OTA_CLIENT_NONE
+        otaClientSetup();
     #endif
 
     // -------------------------------------------------------------------------
@@ -153,7 +193,7 @@ void setup() {
     #if I2C_SUPPORT
         i2cSetup();
     #endif
-    #if defined(ITEAD_SONOFF_RFBRIDGE) || RF_SUPPORT
+    #if RF_SUPPORT
         rfbSetup();
     #endif
     #if ALEXA_SUPPORT
@@ -161,6 +201,9 @@ void setup() {
     #endif
     #if NOFUSS_SUPPORT
         nofussSetup();
+    #endif
+    #if SENSOR_SUPPORT
+        sensorSetup();
     #endif
     #if INFLUXDB_SUPPORT
         idbSetup();
@@ -180,11 +223,11 @@ void setup() {
     #if HOMEASSISTANT_SUPPORT
         haSetup();
     #endif
-    #if SENSOR_SUPPORT
-        sensorSetup();
-    #endif
     #if SCHEDULER_SUPPORT
         schSetup();
+    #endif
+    #if RPN_RULES_SUPPORT
+        rpnSetup();
     #endif
     #if UART_MQTT_SUPPORT
         uartmqttSetup();
@@ -192,7 +235,15 @@ void setup() {
     #ifdef FOXEL_LIGHTFOX_DUAL
         lightfoxSetup();
     #endif
-
+    #if THERMOSTAT_SUPPORT
+        thermostatSetup();
+    #endif
+    #if THERMOSTAT_DISPLAY_SUPPORT
+        displaySetup();
+    #endif
+    #if TUYA_SUPPORT
+        tuyaSetup();
+    #endif
 
     // 3rd party code hook
     #if USE_EXTRA
@@ -202,15 +253,29 @@ void setup() {
     // Prepare configuration for version 2.0
     migrate();
 
+    // Set up delay() after loop callbacks are finished
+    // Note: should be after settingsSetup()
+    _loop_delay = atol(getSetting("loopDelay", LOOP_DELAY_TIME).c_str());
+    _loop_delay = constrain(_loop_delay, 0, 300);
+
     saveSettings();
 
 }
 
 void loop() {
 
+    // Reload config before running any callbacks
+    if (_reload_config) {
+        _espurnaReload();
+        _reload_config = false;
+    }
+
     // Call registered loop callbacks
     for (unsigned char i = 0; i < _loop_callbacks.size(); i++) {
         (_loop_callbacks[i])();
     }
+
+    // Power saving delay
+    if (_loop_delay) delay(_loop_delay);
 
 }

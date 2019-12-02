@@ -15,6 +15,10 @@ Copyright (C) 2016-2019 by Xose Pérez <xose dot perez at gmail dot com>
 #include <DebounceEvent.h>
 #include <vector>
 
+#include "system.h"
+#include "relay.h"
+#include "light.h"
+
 typedef struct {
     DebounceEvent * button;
     unsigned long actions;
@@ -36,7 +40,17 @@ void buttonMQTT(unsigned char id, uint8_t event) {
 
 #if WEB_SUPPORT
 
-bool _buttonWebSocketOnReceive(const char * key, JsonVariant& value) {
+unsigned char _buttonCount() {
+    return _buttons.size();
+}
+
+void _buttonWebSocketOnVisible(JsonObject& root) {
+    if (_buttonCount() > 0) {
+        root["btnVisible"] = 1;
+    }
+}
+
+bool _buttonWebSocketOnKeyCheck(const char * key, JsonVariant& value) {
     return (strncmp(key, "btn", 3) == 0);
 }
 
@@ -124,7 +138,11 @@ void buttonEvent(unsigned int id, unsigned char event) {
     }
     
     if (BUTTON_MODE_AP == action) {
-        wifiStartAP();
+        if (wifiState() & WIFI_STATE_AP) {
+            wifiStartSTA();
+        } else {
+            wifiStartAP();
+        }
     }
     
     if (BUTTON_MODE_RESET == action) {
@@ -186,6 +204,7 @@ void buttonSetup() {
     #else
 
         unsigned long btnDelay = getSetting("btnDelay", BUTTON_DBLCLICK_DELAY).toInt();
+        UNUSED(btnDelay);
 
         #if BUTTON1_PIN != GPIO_NONE
         {
@@ -242,7 +261,9 @@ void buttonSetup() {
 
     // Websocket Callbacks
     #if WEB_SUPPORT
-        wsOnReceiveRegister(_buttonWebSocketOnReceive);
+        wsRegister()
+            .onVisible(_buttonWebSocketOnVisible)
+            .onKeyCheck(_buttonWebSocketOnKeyCheck);
     #endif
 
     // Register loop
