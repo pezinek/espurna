@@ -159,6 +159,10 @@ void setup() {
     #if LIGHT_PROVIDER != LIGHT_PROVIDER_NONE
         lightSetup();
     #endif
+    // rpnSetup must be called before relaySetup to initialize $relayN variables
+    #if RPN_RULES_SUPPORT
+        rpnSetup();
+    #endif
     relaySetup();
     #if BUTTON_SUPPORT
         buttonSetup();
@@ -226,9 +230,6 @@ void setup() {
     #endif
     #if SCHEDULER_SUPPORT
         schSetup();
-    #endif
-    #if RPN_RULES_SUPPORT
-        rpnSetup();
     #endif
     #if UART_MQTT_SUPPORT
         uartmqttSetup();
